@@ -15,8 +15,6 @@ import httplib2
 from mimetypes import guess_type
 from apiclient import discovery
 import oauth2client
-from oauth2client import client
-from oauth2client import tools
 
 #
 # Set defaults
@@ -29,7 +27,8 @@ logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s',
 # Globals
 #
 CONFIG_DIRNAME = '.noyb'
-SCOPES = 'https://www.googleapis.com/auth/drive.metadata.readonly'
+SCOPES = 'https://www.googleapis.com/auth/drive.file '
+'https://www.googleapis.com/auth/drive.metadata.readonly'
 
 #
 # Functions
@@ -61,19 +60,18 @@ def gdrive_get_creds(config_dir, args):
     credential_path = os.path.join(config_dir, 'gdrive.json')
     logging.debug('loading google drive credentials from {0}'.format(
         credential_path))
-
-
-
     store = oauth2client.file.Storage(credential_path)
     credentials = store.get()
     if not credentials or credentials.invalid:
-        flow = client.flow_from_clientsecrets(args.clientsecret,
+        flow = oauth2client.client.flow_from_clientsecrets(args.clientsecret,
             scope=SCOPES,
             redirect_uri='http://localhost')
         flow.access_type = 'offline'
         flow.user_agent = args.appname
 
         if args.authcode:
+            logging.debug('storing google drive credentials to {0}'.format(
+                credential_path))
             credentials = flow.step2_exchange(args.authcode)
             storage = oauth2client.file.Storage(credential_path)
             storage.put(credentials)
@@ -82,9 +80,9 @@ def gdrive_get_creds(config_dir, args):
             print ('You need to generate a Google API access token.\n'
                 'Please open the following url: {0}\n'
                 'and save'.format(auth_uri))
-
-    logging.debug('storing google drive credentials to {0}'.format(
-        credential_path))
+    elif credentials.access_token_expired:
+        logging.debug('google drive credentials are expired!')
+        sys.exit(401)
 
     return credentials
 

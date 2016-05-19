@@ -8,10 +8,11 @@ Encrypts and syncs local files with Google Drive. Because my files are _None Of 
   * [google-api-python-client](https://github.com/google/google-api-python-client)
   * [httplib2](https://pypi.python.org/pypi/httplib2)
 
-On Archlinux
+# Installation
 
-    pacman -S python2-httplib2
-    pacman -S python2-google-api-python-client
+To install as a Python package run:
+
+  pip install noyb
 
 # Usage
 
