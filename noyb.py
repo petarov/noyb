@@ -26,8 +26,11 @@ logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s',
 #
 # Globals
 #
-CONFIG_DIRNAME = '.noyb'
-SCOPES = 'https://www.googleapis.com/auth/drive.file '
+CFG_DIRNAME = '.noyb'
+CFG_DIRNAME_LOCAL = '.noyb'
+CFG_FILENAME = 'config.json'
+CFG_GDRIVE_FILENAME = 'gdrive.json'
+CFG_GDRIFE_SCOPES = 'https://www.googleapis.com/auth/drive.file '
 'https://www.googleapis.com/auth/drive.metadata.readonly'
 
 #
@@ -44,7 +47,7 @@ def config_load(config_dir, args):
     if not os.path.exists(config_dir):
         os.makedirs(config_dir)
 
-    config_path = os.path.join(config_dir, 'config.json')
+    config_path = os.path.join(config_dir, CFG_FILENAME)
     if not os.path.exists(config_path):
         config_create_default(config_path, args)
 
@@ -53,18 +56,36 @@ def config_load(config_dir, args):
         config = json.load(infile)
         return config
 
+def config_local_create_default(config_path, args):
+    logging.debug('creating new local repo config file at {0}'.format(config_path))
+    data = {'gnupg': args.gnupg, 'keyid': args.keyid}
+    with open(config_path, 'w') as outfile:
+        json.dump(data, outfile, indent = 2, ensure_ascii=False)
+
+def config_local_load(local_dir, args):
+    local_config_path = os.path.join(local_dir, CFG_DIRNAME_LOCAL)
+    if not os.path.exists(local_config_path):
+        os.makedirs(local_config_path)
+
+    local_config_path = os.path.join(local_config_path, CFG_FILENAME)
+    if os.path.exists(local_config_path):
+        logging.info('{0} is already initialized'.format(local_dir))
+    else:
+        logging.info('initializing ...')
+        config_local_create_default(local_config_path, args)
+
 def gdrive_get_creds(config_dir, args):
     if not os.path.exists(config_dir):
         os.makedirs(config_dir)
 
-    credential_path = os.path.join(config_dir, 'gdrive.json')
+    credential_path = os.path.join(config_dir, CFG_GDRIVE_FILENAME)
     logging.debug('loading google drive credentials from {0}'.format(
         credential_path))
     store = oauth2client.file.Storage(credential_path)
     credentials = store.get()
     if not credentials or credentials.invalid:
         flow = oauth2client.client.flow_from_clientsecrets(args.clientsecret,
-            scope=SCOPES,
+            scope=CFG_GDRIFE_SCOPES,
             redirect_uri='http://localhost')
         flow.access_type = 'offline'
         flow.user_agent = args.appname
@@ -110,12 +131,14 @@ def cmd_config(args):
     logging.info('configuring ...')
 
     home_dir = os.path.expanduser('~')
-    config_dir = os.path.join(home_dir, CONFIG_DIRNAME)
+    config_dir = os.path.join(home_dir, CFG_DIRNAME)
 
     config = config_load(config_dir, args)
     gdrive_creds = gdrive_get_creds(config_dir, args)
-    gdrive_service = gdrive_get_service(gdrive_creds)
+    if not gdrive_creds or gdrive_creds.invalid:
+        logging.error('No valid credentials found! Cannot continue.')
 
+    gdrive_service = gdrive_get_service(gdrive_creds)
     results = gdrive_service.files().list(
         pageSize=10, fields="nextPageToken, files(id, name)").execute()
     items = results.get('files', [])
@@ -126,8 +149,9 @@ def cmd_config(args):
         for item in items:
             print('{0} ({1})'.format(item['name'], item['id']))
 
-def cmd_int():
-    logging.info('initializing ...')
+def cmd_init(args):
+    local_config = config_local_load(os.getcwd(), args)
+
 
 def cmd_push():
     logging.info('pushing ...')
@@ -179,7 +203,7 @@ if (command not in COMMANDS):
 
 if (command == 'config'):
     cmd_config(args)
-elif (command == 'int'):
-    cmd_init()
+elif (command == 'init'):
+    cmd_init(args)
 elif (command == 'push'):
-    cmd_push()
+    cmd_push(args)
