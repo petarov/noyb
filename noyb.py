@@ -39,6 +39,11 @@ CFG_GDRIFE_SCOPES = 'https://www.googleapis.com/auth/drive.file '
 
 def config_create_default(config_path, args):
     logging.debug('creating new config file at {0}'.format(config_path))
+
+    if not os.path.exists(args.temp):
+        logging.error('temp path ''{0}'' does not exist!'.format(args.temp))
+        sys.exit(500)
+
     data = {'temp': args.temp}
     with open(config_path, 'w') as outfile:
         json.dump(data, outfile, indent = 2, ensure_ascii=False)
@@ -56,9 +61,24 @@ def config_load(config_dir, args):
         config = json.load(infile)
         return config
 
+def config_verify_keyid(gnupg_path, keyid):
+    logging.debug('verifying key={0} ...'.format(keyid))
+
+    if not gnupg_path:
+        gnupg_path = None
+
+    gpg = gnupg.GPG(verbose='basic',
+        homedir=None)
+    pubkeys = gpg.list_keys()
+    print (pubkeys.fingerprints)
+    print ('\n')
+    for gpgkey in pubkeys:
+        for k, v in gpgkey.items():
+            print ("%s: %s" % (k.capitalize(), v))
+
 def config_local_create_default(config_path, args):
     logging.debug('creating new local repo config file at {0}'.format(config_path))
-    data = {'gnupg': args.gnupg, 'keyid': args.keyid}
+    data = {'gnupg': args.gnupg or '', 'keyid': args.keyid or ''}
     with open(config_path, 'w') as outfile:
         json.dump(data, outfile, indent = 2, ensure_ascii=False)
 
@@ -73,6 +93,13 @@ def config_local_load(local_dir, args):
     else:
         logging.info('initializing ...')
         config_local_create_default(local_config_path, args)
+
+    logging.debug('loading local configuration from {0}'.format(local_config_path))
+    with open(local_config_path, 'r') as infile:
+        config = json.load(infile)
+        config_verify_keyid(config['gnupg'], config['keyid'])
+        return config
+
 
 def gdrive_get_creds(config_dir, args):
     if not os.path.exists(config_dir):
@@ -98,9 +125,11 @@ def gdrive_get_creds(config_dir, args):
             storage.put(credentials)
         else:
             auth_uri = flow.step1_get_authorize_url()
-            print ('You need to generate a Google API access token.\n'
-                'Please open the following url: {0}\n'
-                'and save'.format(auth_uri))
+            print ('You need to generate a Google API access token. '
+                'Please open the following url: \n\n{0}\n\n'
+                'Afterwards pass the authentication token using '
+                'the ''-ac'' parameter.'.format(auth_uri))
+            sys.exit(401)
     elif credentials.access_token_expired:
         logging.debug('google drive credentials are expired!')
         sys.exit(401)
@@ -150,6 +179,8 @@ def cmd_config(args):
             print('{0} ({1})'.format(item['name'], item['id']))
 
 def cmd_init(args):
+    
+
     local_config = config_local_load(os.getcwd(), args)
 
 
@@ -182,9 +213,11 @@ group.add_argument('-t', '--temp',
 group = parser.add_argument_group(
     '[init] initializes a directory to be pushed to remote')
 group.add_argument('-g', '--gnupg',
-    help='GnuPG keystore path')
-group.add_argument('-k', '--keyid',
+    help='GnuPG key rings directory path')
+group.add_argument('-i', '--keyid',
     help='keypair ID to use to encrypt directory files')
+group.add_argument('-n', '--enable-names',
+    help='do not encrypt file names')
 
 group = parser.add_argument_group(
     '[push] pushes all unchanged files in the current directory')
