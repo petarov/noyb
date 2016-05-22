@@ -23,6 +23,9 @@ reload(sys)
 sys.setdefaultencoding('utf-8')
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s',
     stream=sys.stdout, level=logging.DEBUG)
+logging.getLogger('gnupg').setLevel(logging.WARNING)
+logging.getLogger('oauth2client').setLevel(logging.WARNING)
+
 #
 # Globals
 #
@@ -46,7 +49,7 @@ def config_create_default(config_path, args):
 
     data = {'temp': args.temp}
     with open(config_path, 'w') as outfile:
-        json.dump(data, outfile, indent = 2, ensure_ascii=False)
+        json.dump(data, outfile, indent=2, ensure_ascii=False)
 
 def config_load(config_dir, args):
     if not os.path.exists(config_dir):
@@ -61,26 +64,26 @@ def config_load(config_dir, args):
         config = json.load(infile)
         return config
 
-def config_verify_keyid(gnupg_path, keyid):
+def config_gnupg_getkey(gnupg_path, keyid):
     logging.debug('verifying key={0} ...'.format(keyid))
 
     if not gnupg_path:
         gnupg_path = None
 
     gpg = gnupg.GPG(verbose='basic',
-        homedir=None)
-    pubkeys = gpg.list_keys()
-    print (pubkeys.fingerprints)
-    print ('\n')
-    for gpgkey in pubkeys:
-        for k, v in gpgkey.items():
-            print ("%s: %s" % (k.capitalize(), v))
+        homedir=gnupg_path)
+    allkeys = gpg.list_keys()
+    for gpgkey in allkeys:
+        print (gpgkey['keyid'])
+        if gpgkey['fingerprint'].endswith(keyid):
+            logging.debug('Found GPG key={0}'.format(gpgkey['fingerprint']))
+            return gpgkey
 
 def config_local_create_default(config_path, args):
     logging.debug('creating new local repo config file at {0}'.format(config_path))
     data = {'gnupg': args.gnupg or '', 'keyid': args.keyid or ''}
     with open(config_path, 'w') as outfile:
-        json.dump(data, outfile, indent = 2, ensure_ascii=False)
+        json.dump(data, outfile, indent=2, ensure_ascii=False)
 
 def config_local_load(local_dir, args):
     local_config_path = os.path.join(local_dir, CFG_DIRNAME_LOCAL)
@@ -97,7 +100,11 @@ def config_local_load(local_dir, args):
     logging.debug('loading local configuration from {0}'.format(local_config_path))
     with open(local_config_path, 'r') as infile:
         config = json.load(infile)
-        config_verify_keyid(config['gnupg'], config['keyid'])
+        gpgkey = config_gnupg_getkey(config['gnupg'], config['keyid'])
+        if not gpgkey:
+            logging.error('Could not find GPG key={0}'.format(config['keyid']))
+            sys.exit(401)
+
         return config
 
 
@@ -179,8 +186,6 @@ def cmd_config(args):
             print('{0} ({1})'.format(item['name'], item['id']))
 
 def cmd_init(args):
-    
-
     local_config = config_local_load(os.getcwd(), args)
 
 
@@ -192,44 +197,45 @@ def cmd_push():
 #
 COMMANDS = ['config', 'init', 'push']
 
-parser = argparse.ArgumentParser(
+parser = argparse.ArgumentParser(add_help=False,
     description="Don't worry loves, cavalry's here!")
+subparsers = parser.add_subparsers(dest='command',
+    help='Help me')
 
-group = parser.add_argument_group(
-    '[register] configure authentication')
-
-group = parser.add_argument_group(
-    '[config] global configurations')
-group.add_argument('-cs', '--clientsecret',
+parser_config = subparsers.add_parser('configure',
+    description='Configure general authentication')
+parser_config.add_argument('-cs', '--clientsecret',
     help='path to Google Drive client secret json file')
-group.add_argument('-ac', '--authcode',
+parser_config.add_argument('-ac', '--authcode',
     help='Google Drive OAuth2 authorization code')
-group.add_argument('-a', '--appname',
+parser_config.add_argument('-a', '--appname',
     help='name of Google Drive app to register (custom)')
-group.add_argument('-t', '--temp',
+parser_config.add_argument('-t', '--temp',
     default=tempfile.gettempdir(),
     help='save temporary files to this path')
 
-group = parser.add_argument_group(
-    '[init] initializes a directory to be pushed to remote')
-group.add_argument('-g', '--gnupg',
+parser_init = subparsers.add_parser('init',
+    description='Initializes a directory to be pushed to remote.')
+parser_init.add_argument('-g', '--gnupg',
     help='GnuPG key rings directory path')
-group.add_argument('-i', '--keyid',
+parser_init.add_argument('-i', '--keyid',
     help='keypair ID to use to encrypt directory files')
-group.add_argument('-n', '--enable-names',
-    help='do not encrypt file names')
+parser_init.add_argument('-n', '--enable-names',
+    help='do not encrypt file names',
+    action='store_true', default=False)
 
-group = parser.add_argument_group(
-    '[push] pushes all unchanged files in the current directory')
-group.add_argument('-f', '--force', action='store_true',
+parser_push = subparsers.add_parser('push',
+    description='Pushes all unchanged files in the current directory.')
+parser_push.add_argument('-f', '--force', action='store_true',
     help='skips file change verification')
 
-parser.add_argument('command',
-    help='command to execute')
+parser_pull = subparsers.add_parser('pull',
+    description='Pulls all unchanged files in the current directory')
+parser_pull.add_argument('-f', '--force', action='store_true',
+    help='skips file change verification')
 
 args = parser.parse_args()
 command = args.command
-
 if (command not in COMMANDS):
     parser.print_help()
     sys.exit(-1)
