@@ -14,6 +14,7 @@ import gnupg
 import httplib2
 from mimetypes import guess_type
 from apiclient import discovery
+import apiclient
 import oauth2client
 
 #
@@ -138,6 +139,7 @@ def gdrive_get_creds(config_dir, args):
                 'the ''-ac'' parameter.'.format(auth_uri))
             sys.exit(401)
     elif credentials.access_token_expired:
+        print (vars(credentials))
         logging.debug('google drive credentials are expired!')
         sys.exit(401)
 
@@ -148,20 +150,6 @@ def gdrive_get_service(creds):
     service = discovery.build('drive', 'v3', http=http)
     return service
 
-def cmd_enr():
-    logging.info('initializing ...')
-
-    gpg = gnupg.GPG(verbose=False,
-        homedir='./tests')
-    pubkeys = gpg.list_keys()
-    for gpgkey in pubkeys:
-        for k, v in gpgkey.items():
-            print ("%s: %s" % (k.capitalize(), v))
-
-    f = open('tests/test.tgz', 'r')
-    encrypted = gpg.encrypt(f,
-        'C7B5AD893CDFEF33', passphrase='test', always_trust=True,
-        output='tests/test.pgp')
 
 def cmd_config(args):
     logging.info('configuring ...')
@@ -175,22 +163,49 @@ def cmd_config(args):
         logging.error('No valid credentials found! Cannot continue.')
 
     gdrive_service = gdrive_get_service(gdrive_creds)
-    results = gdrive_service.files().list(
-        pageSize=10, fields="nextPageToken, files(id, name)").execute()
-    items = results.get('files', [])
-    if not items:
-        print('No files found.')
-    else:
-        print('Files:')
-        for item in items:
-            print('{0} ({1})'.format(item['name'], item['id']))
 
 def cmd_init(args):
     local_config = config_local_load(os.getcwd(), args)
 
-
-def cmd_push():
+def cmd_push(args):
     logging.info('pushing ...')
+
+    home_dir = os.path.expanduser('~')
+    config_dir = os.path.join(home_dir, CFG_DIRNAME)
+
+    config = config_load(config_dir, args)
+    gdrive_creds = gdrive_get_creds(config_dir, args)
+    if not gdrive_creds or gdrive_creds.invalid:
+        logging.error('No valid credentials found! Cannot continue.')
+
+    gdrive_service = gdrive_get_service(gdrive_creds)
+
+    local_config = config_local_load(os.getcwd(), args)
+    gpg = gnupg.GPG(verbose=False,
+        homedir=local_config['gnupg'])
+
+    for file in os.listdir(os.getcwd()):
+        if file.endswith('.zip'):
+            dest_path = os.path.join(config['temp'], file + '.gpg')
+
+            logging.debug('encrypt {0} ...'.format(file))
+            f = open(file, 'r')
+            encrypted = gpg.encrypt(f,
+                local_config['keyid'], always_trust=True,
+                output=dest_path)
+
+            logging.debug('uploading {0} ...'.format(dest_path))
+            media_body = apiclient.http.MediaFileUpload(
+                dest_path,
+                mimetype='application/octet-stream'
+            )
+            metadata = {
+              'name': file,
+              'description': 'my test upload',
+              'custom_noyb': 'NOYB'
+            }
+            new_file = gdrive_service.files().create(body=metadata,
+                media_body=media_body).execute()
 
 #
 # Parse arguments
@@ -199,11 +214,10 @@ COMMANDS = ['config', 'init', 'push']
 
 parser = argparse.ArgumentParser(add_help=False,
     description="Don't worry loves, cavalry's here!")
-subparsers = parser.add_subparsers(dest='command',
-    help='Help me')
+subparsers = parser.add_subparsers(dest='command')
 
-parser_config = subparsers.add_parser('configure',
-    description='Configure general authentication')
+parser_config = subparsers.add_parser('config',
+    description='Configure general authentication.')
 parser_config.add_argument('-cs', '--clientsecret',
     help='path to Google Drive client secret json file')
 parser_config.add_argument('-ac', '--authcode',
@@ -246,3 +260,5 @@ elif (command == 'init'):
     cmd_init(args)
 elif (command == 'push'):
     cmd_push(args)
+elif (command == 'pull'):
+    cmd_pull(args)
